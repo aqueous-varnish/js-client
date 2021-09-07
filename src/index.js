@@ -159,6 +159,13 @@ const AQVS = {
   },
 
   spaces: {
+    makeGatewayFilepaths: (spaceAddress, paths) => {
+      const env = ENVIRONMENTS[AQVS.env];
+      return paths.map(p => {
+        return `${env.gateway}/${spaceAddress}${p.path.startsWith("/") ? p.path : "/" + p.path}`;
+      });
+    },
+
     getSpaceByAddress: async (spaceAddress) => {
       const web3 = await AQVS.getWeb3();
       const { spaceABI } = AQVS.ABI;
