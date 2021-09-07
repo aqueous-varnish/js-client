@@ -4,6 +4,11 @@ jobs:
   e2e-tests:
     name: e2e Client Tests
     runs-on: ubuntu-latest
+    env:
+      TEST_PULLZONE: ${{ secrets.TEST_PULLZONE }}
+      TEST_PULLZONE_SIGNING_TOKEN: ${{ secrets.TEST_PULLZONE_SIGNING_TOKEN }}
+      TEST_STORAGEZONE: ${{ secrets.TEST_STORAGEZONE }}
+      TEST_STORAGEZONE_ACCESS_KEY: ${{ secrets.TEST_STORAGEZONE_ACCESS_KEY }}
     steps:
       - name: Get yarn cache directory path
         id: yarn-cache-dir-path
@@ -38,7 +43,7 @@ jobs:
           cd gateway
           rm -rf ganache_db && unzip ./test/fixtures/ganache_db.zip -d ./
           sudo chmod 755 -R ganache_db
-          docker-compose -f docker-compose.yml -f docker-compose.test-env.yml up --abort-on-container-exit --build --force-recreate --detach
+          docker-compose -f docker-compose.yml -f docker-compose.test-env.yml up --build --force-recreate --detach
           cd -
 
       - name: Run tests
