@@ -34,6 +34,7 @@ const asUserAccount = async (index, callback) => {
     await AQVS.setFetch(fetch);
     const web3 = new Web3(provider);
     await AQVS.setWeb3(web3);
+
     const publicAddress = (await web3.eth.getCoinbase()).toLowerCase();
     await callback(publicAddress);
     provider.engine.stop();
@@ -43,10 +44,10 @@ const asUserAccount = async (index, callback) => {
   }
 };
 
+
 test('it can manage sessions', async t => {
-  await asUserAccount(Accounts.CREATOR , async () => {
+  await asUserAccount(Accounts.CREATOR , async publicAddress => {
     const web3 = await AQVS.getWeb3();
-    const publicAddress = (await web3.eth.getCoinbase()).toLowerCase();
 
     // Make a session
     const makeSessionResponse = await AQVS.sessions.makeSession(publicAddress);

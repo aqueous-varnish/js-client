@@ -53,6 +53,8 @@ const AQVS = {
     const networkId = await web3.eth.net.getId();
     if (networkId !== env.networkId) throw new Error(ERRORS.wrong_network);
     AQVS._web3 = web3;
+    if (!!AQVS.controllerContract) await AQVS.init();
+    AQVS.spaceContracts = {};
     return web3;
   },
 
