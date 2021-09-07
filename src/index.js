@@ -6,24 +6,25 @@ const ERRORS = {
   abi_request_failed: 'abi_request_failed',
   delete_filepath_empty: 'delete_filepath_empty',
   space_does_not_exist: 'space_does_not_exist',
-  invalid_environment: 'invalid_environment'
+  invalid_environment: 'invalid_environment',
+  no_truffle_contract_set: 'no_truffle_contract_set'
 };
 
 const ENVIRONMENTS = {
   'dev': {
-    proxy: 'http://localhost:3000',
+    gateway: 'http://localhost:3000',
     networkId: 5777
   },
   'ropsten': {
-    proxy: 'https://ropsten.aqueousvarni.sh',
+    gateway: 'https://ropsten.aqueousvarni.sh',
     networkId: 3
   },
   'rinkeby': {
-    proxy: 'https://rinkeby.aqueousvarni.sh',
+    gateway: 'https://rinkeby.aqueousvarni.sh',
     networkId: 4
   },
   'mainnet': {
-    proxy: 'https://mainnet.aqueousvarni.sh',
+    gateway: 'https://mainnet.aqueousvarni.sh',
     networkId: 1
   }
 };
@@ -36,16 +37,25 @@ const AQVS = {
   setEnv: async (env) => {
     if (!Object.keys(ENVIRONMENTS).includes(env)) throw new Error(ERRORS.invalid_environment);
     AQVS.env = env;
-    if (!!AQVS.contracts) await AQVS.initContracts();
+    if (!!AQVS.controllerContract) await AQVS.init();
   },
 
-  web3: null,
+  _web3: null,
+  getWeb3: async () => {
+    if (!AQVS._web3) throw new Error(ERRORS.no_web3_set);
+    const env = ENVIRONMENTS[AQVS.env];
+    const networkId = await AQVS._web3.eth.net.getId();
+    if (networkId !== env.networkId) throw new Error(ERRORS.wrong_network);
+    return AQVS._web3;
+  },
   setWeb3: async (web3) => {
     const env = ENVIRONMENTS[AQVS.env];
     const networkId = await web3.eth.net.getId();
     if (networkId !== env.networkId) throw new Error(ERRORS.wrong_network);
-    AQVS.web3 = web3;
-    if (!!AQVS.contracts) await AQVS.initContracts();
+    AQVS._web3 = web3;
+    if (!!AQVS.controllerContract) await AQVS.init();
+    AQVS.spaceContracts = {};
+    return web3;
   },
 
   fetch: null,
@@ -53,52 +63,43 @@ const AQVS = {
     AQVS.fetch = fetch;
   },
 
-  contract: null,
-  setContract: (contract) => {
-    AQVS.contract = contract;
-  },
-
   ABI: {},
   setABI: (abi) => {
     AQVS.ABI = abi;
   },
 
-  contracts: null,
-  spaceContracts: {},
-  initContracts: async () => {
-    if (!AQVS.web3) throw new Error(ERRORS.no_web3_set);
+  truffleContract: null,
+  setTruffleContract: (truffleContract) => {
+    AQVS.truffleContract = truffleContract;
+  },
 
-    // TODO: Test that networkId matches
+  // TODO: Nest
+  controllerContract: null,
+  spaceContracts: {},
+
+  init: async () => {
+    const web3 = await AQVS.getWeb3();
+    if (!AQVS.truffleContract) throw new Error(ERRORS.no_truffle_contract_set);
     const env = ENVIRONMENTS[AQVS.env];
 
-    let { aqvsABI, tokensABI, spaceABI } = AQVS.ABI;
-    if (!aqvsABI || !tokensABI || !spaceABI) {
-      const aqvsABIResponse = await AQVS.fetch(`${env.proxy}/artifacts/AQVS.json`);
+    let { aqvsABI, spaceABI } = AQVS.ABI;
+    if (!aqvsABI || !spaceABI) {
+      const aqvsABIResponse = await AQVS.fetch(`${env.gateway}/artifacts/AQVSController.json`);
       if (!aqvsABIResponse.ok) throw new Error(ERRORS.abi_request_failed);
       aqvsABI = await aqvsABIResponse.json();
 
-      const aqvsTokensABIResponse = await AQVS.fetch(`${env.proxy}/artifacts/AQVSTokens.json`);
-      if (!aqvsTokensABIResponse.ok) throw new Error(ERRORS.abi_request_failed);
-      tokensABI = await aqvsTokensABIResponse.json();
-
-      const aqvsSpaceABIResponse = await AQVS.fetch(`${env.proxy}/artifacts/AQVSSpace.json`);
+      const aqvsSpaceABIResponse = await AQVS.fetch(`${env.gateway}/artifacts/AQVSSpaceV1.json`);
       if (!aqvsSpaceABIResponse.ok) throw new Error(ERRORS.abi_request_failed);
       spaceABI = await aqvsSpaceABIResponse.json();
 
-      AQVS.setABI({ aqvsABI, tokensABI, spaceABI });
+      AQVS.setABI({ aqvsABI, spaceABI });
     }
 
-    const AQVSContract = AQVS.contract(aqvsABI);
-    AQVSContract.setProvider(AQVS.web3.currentProvider);
+    const AQVSContract = AQVS.truffleContract(aqvsABI);
+    AQVSContract.setProvider(web3.currentProvider);
     AQVSContract.setNetwork(env.networkId);
-    const aqvs = await AQVSContract.deployed();
-
-    const AQVSTokenContract = AQVS.contract(tokensABI);
-    AQVSTokenContract.setProvider(AQVS.web3.currentProvider);
-    AQVSTokenContract.setNetwork(env.networkId);
-    const tokens = await AQVSTokenContract.at(await aqvs.tokens());
-
-    AQVS.contracts = { aqvs, tokens };
+    AQVS.controllerContract = await AQVSContract.deployed();
+    return AQVS.controllerContract;
   },
 
   units: {
@@ -109,8 +110,8 @@ const AQVS = {
 
   utils: {
     ensureBigNumber: (number) => {
-      if (AQVS.web3.utils.isBN(number)) return number;
-      return AQVS.web3.utils.toBN(number);
+      if (AQVS._web3.utils.isBN(number)) return number;
+      return AQVS._web3.utils.toBN(number);
     }
   },
 
@@ -118,14 +119,15 @@ const AQVS = {
     requestNonce: async () => {
       const env = ENVIRONMENTS[AQVS.env];
       return AQVS.fetch(
-        `${env.proxy}/nonce`,
+        `${env.gateway}/nonce`,
         { method: 'post' }
       );
     },
 
     signNonce: async (publicAddress, nonce) => {
+      const web3 = await AQVS.getWeb3();
       publicAddress = publicAddress.toLowerCase();
-      return (await AQVS.web3.eth.personal.sign(
+      return (await web3.eth.personal.sign(
         nonce,
         publicAddress,
         '' // MetaMask will ignore the password argument here
@@ -138,7 +140,7 @@ const AQVS = {
       const { requestId, nonce } = await (await AQVS.sessions.requestNonce()).json();
       const signature = await AQVS.sessions.signNonce(publicAddress, nonce);
       return AQVS.fetch(
-        `${env.proxy}/session?requestId=${requestId}&publicAddress=${publicAddress}&signature=${signature}`,
+        `${env.gateway}/session?requestId=${requestId}&publicAddress=${publicAddress}&signature=${signature}`,
         { credentials: 'include' }
       );
     },
@@ -147,115 +149,130 @@ const AQVS = {
       const env = ENVIRONMENTS[AQVS.env];
       let options = { credentials: 'include' };
       if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
-      return AQVS.fetch(`${env.proxy}/session`, options);
+      return AQVS.fetch(`${env.gateway}/session`, options);
     },
 
     flushSession: async (cookie) => {
       const env = ENVIRONMENTS[AQVS.env];
       let options = { credentials: 'include', method: 'delete' };
       if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
-      return AQVS.fetch(`${env.proxy}/session`, options);
+      return AQVS.fetch(`${env.gateway}/session`, options);
     },
   },
 
   spaces: {
-    getSpaceById: async (spaceId) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
-      const spaceAddress = await AQVS.contracts.aqvs.spacesById(spaceId);
-      if (spaceAddress === "0x0000000000000000000000000000000000000000") return null;
-      return await AQVS.spaces.getSpaceByAddress(spaceAddress);
+    makeGatewayFilepaths: (spaceAddress, paths) => {
+      const env = ENVIRONMENTS[AQVS.env];
+      return paths.map(p => {
+        return `${env.gateway}/${spaceAddress}${p.path.startsWith("/") ? p.path : "/" + p.path}`;
+      });
     },
 
     getSpaceByAddress: async (spaceAddress) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
+      const web3 = await AQVS.getWeb3();
+      const { spaceABI } = AQVS.ABI;
+      if (!spaceABI) throw new Error(ERRORS.no_abi_set);
+      const { networkId } = ENVIRONMENTS[AQVS.env];
+
       const sanitizedSpaceAddress = `${spaceAddress}`.toLowerCase();
-      if (sanitizedSpaceAddress === "0x0000000000000000000000000000000000000000") return null;
-      if (AQVS.spaceContracts[sanitizedSpaceAddress]) {
-        return AQVS.spaceContracts[sanitizedSpaceAddress];
+      if (sanitizedSpaceAddress === "0x0000000000000000000000000000000000000000") {
+        throw new Error(ERRORS.space_does_not_exist);
       }
-      const AQVSSpaceContract = AQVS.contract(AQVS.ABI.spaceABI)
-      AQVSSpaceContract.setProvider(AQVS.web3.currentProvider);
-      AQVSSpaceContract.setNetwork(ENVIRONMENTS[AQVS.env].networkId);
-      AQVS.spaceContracts[sanitizedSpaceAddress] =
-        await AQVSSpaceContract.at(sanitizedSpaceAddress)
-      return AQVS.spaceContracts[sanitizedSpaceAddress];
+
+      AQVS.spaceContracts[networkId] = AQVS.spaceContracts[networkId] || {};
+      if (AQVS.spaceContracts[networkId][sanitizedSpaceAddress]) {
+        return AQVS.spaceContracts[networkId][sanitizedSpaceAddress];
+      }
+
+      const AQVSSpaceContract = AQVS.truffleContract(spaceABI);
+      AQVSSpaceContract.setProvider(web3.currentProvider);
+      AQVSSpaceContract.setNetwork(networkId);
+      AQVS.spaceContracts[networkId][sanitizedSpaceAddress]
+        = await AQVSSpaceContract.at(sanitizedSpaceAddress);
+      return AQVS.spaceContracts[networkId][sanitizedSpaceAddress];
     },
 
     canModifySpace: async (spaceContract, publicAddress) => {
-      publicAddress = publicAddress || (await AQVS.web3.eth.getCoinbase());
+      const web3 = await AQVS.getWeb3();
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
       publicAddress = publicAddress.toLowerCase();
       return ((await spaceContract.creator()).toLowerCase() === publicAddress);
     },
 
     canAccessSpace: async (spaceContract, publicAddress) => {
-      publicAddress = publicAddress || (await AQVS.web3.eth.getCoinbase());
+      const web3 = await AQVS.getWeb3();
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
       publicAddress = publicAddress.toLowerCase();
       if (await AQVS.spaces.canModifySpace(spaceContract, publicAddress)) return true;
-      return (await AQVS.contracts.tokens.balanceOf.call(
-        publicAddress,
-        (await spaceContract.id()).toString()
-      ) > 0);
+      return (await spaceContract.balanceOf.call(publicAddress) > 0);
     },
 
-    getSpaceIdsCreatedBy: async (publicAddress) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
-      publicAddress = publicAddress || (await AQVS.web3.eth.getCoinbase());
+    getSpacesCreatedBy: async (publicAddress) => {
+      const web3 = await AQVS.getWeb3();
+      if (!AQVS.controllerContract) await AQVS.init();
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
       publicAddress = publicAddress.toLowerCase();
-      return (await AQVS.contracts.aqvs.spaceIdsCreatedBy(publicAddress));
+      return (await AQVS.controllerContract.spacesCreatedBy(publicAddress));
     },
 
-    getSpaceIdsOwnedBy: async (publicAddress) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
-      publicAddress = publicAddress || (await AQVS.web3.eth.getCoinbase());
+    getSpacesOwnedBy: async (publicAddress) => {
+      const web3 = await AQVS.getWeb3();
+      if (!AQVS.controllerContract) await AQVS.init();
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
       publicAddress = publicAddress.toLowerCase();
-      return (await AQVS.contracts.aqvs.spaceIdsOwnedBy(publicAddress));
+      return (await AQVS.controllerContract.spacesOwnedBy(publicAddress));
     },
 
     remainingSupply: async (spaceContract) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
-      const spaceId = await spaceContract.id();
-      return await AQVS.contracts.aqvs.remainingSupply(spaceId);
+      if (!AQVS.controllerContract) await AQVS.init();
+      return await AQVS.controllerContract.remainingSupply(spaceContract.address);
     },
 
     spaceFees: async (spaceContract) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
-      const spaceId = await spaceContract.id();
-      return await AQVS.contracts.aqvs.spaceFees(spaceId);
+      if (!AQVS.controllerContract) await AQVS.init();
+      return await AQVS.controllerContract.spaceFees(spaceContract.address);
     },
 
     accessSpace: async (spaceContract) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
-      const publicAddress = (await AQVS.web3.eth.getCoinbase()).toLowerCase();
-      const spaceId = await spaceContract.id();
+      const web3 = await AQVS.getWeb3();
+      if (!AQVS.controllerContract) await AQVS.init();
+      const publicAddress = (await web3.eth.getCoinbase()).toLowerCase();
       const value = await spaceContract.accessPriceInWei();
-      return await AQVS.contracts.aqvs.accessSpace.sendTransaction(spaceId, {
-        from: publicAddress,
-        value
-      });
+      return await AQVS.controllerContract.accessSpace.sendTransaction(
+        spaceContract.address,
+        {
+          from: publicAddress,
+          value
+        }
+      );
     },
 
-    // TODO: Add spaceFees() method
-
-    getSpaceContents: async (spaceId, cookie) => {
+    getSpaceContents: async (spaceAddress, cookie) => {
       const env = ENVIRONMENTS[AQVS.env];
       let options = { credentials: 'include' };
       if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
-      return AQVS.fetch(`${env.proxy}/spaces/${spaceId}`, options);
+      return AQVS.fetch(
+        `${env.gateway}/spaces/${spaceAddress.toLowerCase()}`,
+        options
+      );
     },
 
-    getSpaceMetadata: async (spaceId, cookie) => {
+    getSpaceMetadata: async (spaceAddress, cookie) => {
       const env = ENVIRONMENTS[AQVS.env];
       let options = { credentials: 'include' };
       if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
-      return AQVS.fetch(`${env.proxy}/space-metadata/${spaceId}`, options);
+      return AQVS.fetch(
+        `${env.gateway}/space-metadata/${spaceAddress.toLowerCase()}`,
+        options
+      );
     },
   },
 
   creators: {
     estimateCostToMintSpaceInWei: async (spaceCapacityInBytes) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
+      if (!AQVS.controllerContract) await AQVS.init();
       spaceCapacityInBytes = AQVS.utils.ensureBigNumber(spaceCapacityInBytes);
-      return (await AQVS.contracts.aqvs.weiCostToMintSpace(spaceCapacityInBytes));
+      return (await AQVS.controllerContract.weiCostToMintSpace(spaceCapacityInBytes));
     },
 
     estimateSpaceAccessFeesInWei: async (
@@ -263,37 +280,39 @@ const AQVS = {
       spaceCapacityInBytes,
       accessPriceInWei
     ) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
+      if (!AQVS.controllerContract) await AQVS.init();
       initialSupply = AQVS.utils.ensureBigNumber(initialSupply);
       spaceCapacityInBytes = AQVS.utils.ensureBigNumber(spaceCapacityInBytes);
       accessPriceInWei = AQVS.utils.ensureBigNumber(accessPriceInWei);
-      return (await AQVS.contracts.aqvs.estimateSpaceFees(
+      return (await AQVS.controllerContract.estimateSpaceFees(
         initialSupply,
         spaceCapacityInBytes,
         accessPriceInWei
       ));
     },
 
-    giftSpaceAccess: async (spaceId, gifteeAddress) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
-      return await AQVS.contracts.aqvs.giftSpaceAccess.sendTransaction(
-        spaceId,
+    giftSpaceAccess: async (spaceAddress, gifteeAddress) => {
+      const web3 = await AQVS.getWeb3();
+      if (!AQVS.controllerContract) await AQVS.init();
+      return await AQVS.controllerContract.giftSpaceAccess.sendTransaction(
+        spaceAddress.toLowerCase(),
         gifteeAddress,
         {
-          from: (await AQVS.web3.eth.getCoinbase()).toLowerCase()
+          from: (await web3.eth.getCoinbase()).toLowerCase()
         }
       );
     },
 
-    addSpaceCapacityInBytes: async (spaceId, spaceCapacityInBytes) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
+    addSpaceCapacityInBytes: async (spaceAddress, spaceCapacityInBytes) => {
+      const web3 = await AQVS.getWeb3();
+      if (!AQVS.controllerContract) await AQVS.init();
       spaceCapacityInBytes = AQVS.utils.ensureBigNumber(spaceCapacityInBytes);
-      return await AQVS.contracts.aqvs.addSpaceCapacityInBytes.sendTransaction(
-        spaceId,
+      return await AQVS.controllerContract.addSpaceCapacityInBytes.sendTransaction(
+        spaceAddress.toLowerCase(),
         spaceCapacityInBytes,
         {
-          from: (await AQVS.web3.eth.getCoinbase()).toLowerCase(),
-          value: (await AQVS.contracts.aqvs.weiCostToMintSpace(spaceCapacityInBytes))
+          from: (await web3.eth.getCoinbase()).toLowerCase(),
+          value: (await AQVS.controllerContract.weiCostToMintSpace(spaceCapacityInBytes))
         }
       );
     },
@@ -304,24 +323,44 @@ const AQVS = {
       accessPriceInWei,
       purchasable
     ) => {
-      if (!AQVS.contracts) await AQVS.initContracts();
+      const web3 = await AQVS.getWeb3();
+      if (!AQVS.controllerContract) await AQVS.init();
+      spaceCapacityInBytes = AQVS.utils.ensureBigNumber(spaceCapacityInBytes);
+      return await AQVS.controllerContract.addSpaceCapacityInBytes.sendTransaction(
+        spaceAddress.toLowerCase(),
+        spaceCapacityInBytes,
+        {
+          from: (await web3.eth.getCoinbase()).toLowerCase(),
+          value: (await AQVS.controllerContract.weiCostToMintSpace(spaceCapacityInBytes))
+        }
+      );
+    },
+
+    mintSpace: async (
+      initialSupply,
+      spaceCapacityInBytes,
+      accessPriceInWei,
+      purchasable
+    ) => {
+      const web3 = await AQVS.getWeb3();
+      if (!AQVS.controllerContract) await AQVS.init();
       initialSupply = AQVS.utils.ensureBigNumber(initialSupply);
       spaceCapacityInBytes = AQVS.utils.ensureBigNumber(spaceCapacityInBytes);
       accessPriceInWei = AQVS.utils.ensureBigNumber(accessPriceInWei);
 
-      return await AQVS.contracts.aqvs.mintSpace.sendTransaction(
+      return await AQVS.controllerContract.mintSpace.sendTransaction(
         initialSupply,
         spaceCapacityInBytes,
         accessPriceInWei,
         purchasable,
         {
-          from: (await AQVS.web3.eth.getCoinbase()).toLowerCase(),
-          value: (await AQVS.contracts.aqvs.weiCostToMintSpace(spaceCapacityInBytes))
+          from: (await web3.eth.getCoinbase()).toLowerCase(),
+          value: (await AQVS.controllerContract.weiCostToMintSpace(spaceCapacityInBytes))
         }
       );
     },
 
-    setSpaceMetadata: async (spaceId, data, cookie) => {
+    setSpaceMetadata: async (spaceAddress, data, cookie) => {
       const env = ENVIRONMENTS[AQVS.env];
       const options = {
         credentials: 'include',
@@ -333,11 +372,14 @@ const AQVS = {
         },
       };
       if (cookie) { options.headers.cookie = cookie }
-      return AQVS.fetch(`${env.proxy}/space-metadata/${spaceId}`, options);
+      return AQVS.fetch(
+        `${env.gateway}/space-metadata/${spaceAddress.toLowerCase()}`,
+        options
+      );
     },
 
     uploadFilesToSpace: async (
-      spaceId,
+      spaceAddress,
       formData,
       cookie
     ) => {
@@ -345,11 +387,14 @@ const AQVS = {
       const env = ENVIRONMENTS[AQVS.env];
       let options = { method: 'put', body: formData, credentials: 'include' };
       if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
-      return AQVS.fetch(`${env.proxy}/spaces/${spaceId}`, options);
+      return AQVS.fetch(
+        `${env.gateway}/spaces/${spaceAddress.toLowerCase()}`,
+        options
+      );
     },
 
     deleteFileInSpace: async (
-      spaceId,
+      spaceAddress,
       filePath,
       cookie
     ) => {
@@ -358,17 +403,23 @@ const AQVS = {
       const env = ENVIRONMENTS[AQVS.env];
       let options = { method: 'delete', credentials: 'include' };
       if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
-      return AQVS.fetch(`${env.proxy}/spaces/${spaceId}${filePath}`, options);
+      return AQVS.fetch(
+        `${env.gateway}/spaces/${spaceAddress.toLowerCase()}${filePath}`,
+        options
+      );
     },
 
     deleteAllFilesInSpace: async (
-      spaceId,
+      spaceAddress,
       cookie
     ) => {
       const env = ENVIRONMENTS[AQVS.env];
       let options = { method: 'delete', credentials: 'include' };
       if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
-      return AQVS.fetch(`${env.proxy}/spaces/${spaceId}`, options);
+      return AQVS.fetch(
+        `${env.gateway}/spaces/${spaceAddress.toLowerCase()}`,
+        options
+      );
     }
   },
 
@@ -380,10 +431,11 @@ const AQVS = {
       }
     },
 
-    invokePaywall: async (spaceId, options = {}) => {
-      const spaceContract = await AQVS.spaces.getSpaceById(spaceId);
-      const spaceMetadata = await (await AQVS.spaces.getSpaceMetadata(spaceId)).json();
-      const priceInEth = AQVS.web3.utils.fromWei(
+    invokePaywall: async (spaceAddress, options = {}) => {
+      const web3 = await AQVS.getWeb3();
+      const spaceContract = await AQVS.spaces.getSpaceByAddress(spaceAddress);
+      const spaceMetadata = await (await AQVS.spaces.getSpaceMetadata(spaceAddress)).json();
+      const priceInEth = web3.utils.fromWei(
         await spaceContract.accessPriceInWei(),
         'ether'
       );
