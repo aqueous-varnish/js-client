@@ -38,7 +38,7 @@ jobs:
           cd gateway
           rm -rf ganache_db && unzip ./test/fixtures/ganache_db.zip -d ./
           sudo chmod 755 -R ganache_db
-          docker-compose up --build --force-recreate
+          docker-compose -f docker-compose.yml -f docker-compose.test-env.yml up --abort-on-container-exit --build --force-recreate
           cd -
 
       - name: Run tests
