@@ -124,6 +124,7 @@ const AQVS = {
       );
     },
 
+    // TODO: Remove the publicAddress argument here
     signNonce: async (publicAddress, nonce) => {
       const web3 = await AQVS.getWeb3();
       publicAddress = publicAddress.toLowerCase();
@@ -134,6 +135,7 @@ const AQVS = {
       ));
     },
 
+    // TODO: Remove the publicAddress argument here
     makeSession: async (publicAddress) => {
       publicAddress = publicAddress.toLowerCase();
       const env = ENVIRONMENTS[AQVS.env];
@@ -170,6 +172,7 @@ const AQVS = {
 
     getSpaceByAddress: async (spaceAddress) => {
       const web3 = await AQVS.getWeb3();
+      if (!AQVS.controllerContract) await AQVS.init();
       const { spaceABI } = AQVS.ABI;
       if (!spaceABI) throw new Error(ERRORS.no_abi_set);
       const { networkId } = ENVIRONMENTS[AQVS.env];
@@ -266,6 +269,7 @@ const AQVS = {
         options
       );
     },
+
   },
 
   creators: {
@@ -275,6 +279,7 @@ const AQVS = {
       return (await AQVS.controllerContract.weiCostToMintSpace(spaceCapacityInBytes));
     },
 
+    // TODO: Why does this need initialSupply
     estimateSpaceAccessFeesInWei: async (
       initialSupply,
       spaceCapacityInBytes,
@@ -303,26 +308,53 @@ const AQVS = {
       );
     },
 
-    addSpaceCapacityInBytes: async (spaceAddress, spaceCapacityInBytes) => {
-      const web3 = await AQVS.getWeb3();
-      if (!AQVS.controllerContract) await AQVS.init();
-      spaceCapacityInBytes = AQVS.utils.ensureBigNumber(spaceCapacityInBytes);
-      return await AQVS.controllerContract.addSpaceCapacityInBytes.sendTransaction(
-        spaceAddress.toLowerCase(),
-        spaceCapacityInBytes,
-        {
-          from: (await web3.eth.getCoinbase()).toLowerCase(),
-          value: (await AQVS.controllerContract.weiCostToMintSpace(spaceCapacityInBytes))
-        }
+    getCorsOrigins: async (spaceAddress, cookie) => {
+      const env = ENVIRONMENTS[AQVS.env];
+      let options = { credentials: 'include' };
+      if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
+      return AQVS.fetch(
+        `${env.gateway}/space-cors/${spaceAddress.toLowerCase()}`,
+        options
       );
     },
 
-    mintSpace: async (
-      initialSupply,
-      spaceCapacityInBytes,
-      accessPriceInWei,
-      purchasable
-    ) => {
+    addCorsOrigin: async (spaceAddress, origin, cookie) => {
+      const env = ENVIRONMENTS[AQVS.env];
+      const options = {
+        credentials: 'include',
+        method: 'put',
+        body: JSON.stringify({ origin }),
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+      };
+      if (cookie) { options.headers.cookie = cookie }
+      return AQVS.fetch(
+        `${env.gateway}/space-cors/${spaceAddress.toLowerCase()}`,
+        options
+      );
+    },
+
+    removeCorsOrigin: async (spaceAddress, origin, cookie) => {
+      const env = ENVIRONMENTS[AQVS.env];
+      const options = {
+        credentials: 'include',
+        method: 'delete',
+        body: JSON.stringify({ origin }),
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+      };
+      if (cookie) { options.headers.cookie = cookie }
+      return AQVS.fetch(
+        `${env.gateway}/space-cors/${spaceAddress.toLowerCase()}`,
+        options
+      );
+    },
+
+    addSpaceCapacityInBytes: async (spaceAddress, spaceCapacityInBytes) => {
       const web3 = await AQVS.getWeb3();
       if (!AQVS.controllerContract) await AQVS.init();
       spaceCapacityInBytes = AQVS.utils.ensureBigNumber(spaceCapacityInBytes);

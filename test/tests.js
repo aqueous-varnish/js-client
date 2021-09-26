@@ -77,6 +77,8 @@ test('it can manage sessions', async t => {
 });
 
 test('it can mint spaces', async t => {
+	t.timeout(1000 * 60 * 5); // 5 minutes
+
   await asUserAccount(Accounts.CREATOR, async publicAddress => {
     const web3 = await AQVS.getWeb3();
     const initialBalance = AQVS.utils.ensureBigNumber(
@@ -172,6 +174,49 @@ test('it can mint spaces', async t => {
 	  t.is(metadata.description, 'Spacings');
 	  t.is(metadata.image, 'https://f4.bcbits.com/img/a0195171096_16.jpg');
 
+    // The creator can manage cors for their space
+    const addCorsOriginResponse = await AQVS.creators.addCorsOrigin(
+      SPACE_ADDRESS,
+      "example.com",
+      cookie
+    );
+	  t.is(addCorsOriginResponse.status, 200);
+
+    const addCorsOriginResponse2 = await AQVS.creators.addCorsOrigin(
+      SPACE_ADDRESS,
+      "example2.com",
+      cookie
+    );
+	  t.is(addCorsOriginResponse2.status, 200);
+
+    const getCorsOriginsResponse = await AQVS.creators.getCorsOrigins(
+      SPACE_ADDRESS,
+      cookie
+    );
+	  t.is(getCorsOriginsResponse.status, 200);
+
+    const corsOrigins = (await getCorsOriginsResponse.json()).origins;
+	  t.is(corsOrigins.includes("example.com"), true);
+	  t.is(corsOrigins.includes("example2.com"), true);
+	  t.is(corsOrigins.length, 2);
+
+    const removeCorsOriginResponse = await AQVS.creators.removeCorsOrigin(
+      SPACE_ADDRESS,
+      "example.com",
+      cookie
+    );
+	  t.is(removeCorsOriginResponse.status, 200);
+
+    const getCorsOriginsResponse2 = await AQVS.creators.getCorsOrigins(
+      SPACE_ADDRESS,
+      cookie
+    );
+	  t.is(getCorsOriginsResponse2.status, 200);
+    const corsOrigins2 = (await getCorsOriginsResponse2.json()).origins;
+	  t.is(corsOrigins2.includes("example.com"), false);
+	  t.is(corsOrigins2.includes("example2.com"), true);
+	  t.is(corsOrigins2.length, 1);
+
     // The AQVS Creator can deleta all files in the Space
     const deleteAllFilesInSpaceResponse =
       await AQVS.creators.deleteAllFilesInSpace(SPACE_ADDRESS, cookie);
@@ -191,11 +236,9 @@ test('it can mint spaces', async t => {
     );
 
   });
-
 });
 
 test('it can access spaces', async t => {
-
   await asUserAccount(Accounts.BUYER, async (publicAddress) => {
     const web3 = await AQVS.getWeb3();
     const spaceContract = await AQVS.spaces.getSpaceByAddress(SPACE_ADDRESS);
@@ -225,6 +268,13 @@ test('it can access spaces', async t => {
       headers: { cookie }
     });
     t.is(fetchFileResponse.status, 500);
+
+    // non-creator Can not load cors list
+    const getCorsOriginsResponse = await AQVS.creators.getCorsOrigins(
+      SPACE_ADDRESS,
+      cookie
+    );
+	  t.is(getCorsOriginsResponse.status, 500);
   });
 
   await asUserAccount(Accounts.CREATOR, async () => {
