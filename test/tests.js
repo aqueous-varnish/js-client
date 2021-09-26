@@ -196,6 +196,7 @@ test('it can mint spaces', async t => {
     t.is(getCorsOriginsResponse.status, 200);
 
     const corsOrigins = (await getCorsOriginsResponse.json()).origins;
+    console.log("ORIGINS", corsOrigins);
     t.is(corsOrigins.includes("example.com"), true);
     t.is(corsOrigins.includes("example2.com"), true);
     t.is(corsOrigins.length, 2);
