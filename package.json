@@ -1,6 +1,6 @@
 {
   "name": "@aqueous-varnish/client",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "main": "dist/aqvs.js",
   "license": "MIT",
   "dependencies": {
@@ -14,7 +14,7 @@
     "build": "microbundle",
     "dev": "microbundle watch",
     "prepublishOnly": "microbundle",
-    "test": "ava --serial"
+    "test": "ava --serial --timeout=2m"
   },
   "source": "src/index.js",
   "module": "dist/aqvs.module.js",

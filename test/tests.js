@@ -53,30 +53,32 @@ test('it can manage sessions', async t => {
     const makeSessionResponse = await AQVS.sessions.makeSession(publicAddress);
     const currentSession = await makeSessionResponse.json();
     let cookie = makeSessionResponse.headers.get('set-cookie');
-	  t.is(!!currentSession.publicAddress, true);
+    t.is(!!currentSession.publicAddress, true);
 
     // Fetch a session (Node style, with cookie)
     const fetchSessionResponse = await AQVS.sessions.currentSession(cookie);
     const fetchedSession = await fetchSessionResponse.json();
     cookie = makeSessionResponse.headers.get('set-cookie');
-	  t.is(!!currentSession.publicAddress, true);
+    t.is(!!currentSession.publicAddress, true);
 
     // Flush a session (Node style, with cookie)
     const flushSessionResponse = await AQVS.sessions.flushSession(cookie);
     const flushedSession = await flushSessionResponse.json();
     const unsetCookie = flushSessionResponse.headers.get('set-cookie');
     t.is(unsetCookie, 'aqvs.session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
-	  t.is(flushedSession.status, 'ok');
+    t.is(flushedSession.status, 'ok');
 
     // The old cookie can no longer fetch a session
     const attemptFetchSessionResponse = await AQVS.sessions.currentSession(cookie);
     const attemptFetchSession = await attemptFetchSessionResponse.json();
-	  t.is(attemptFetchSession.error.message, 'session_expired_or_missing');
+    t.is(attemptFetchSession.error.message, 'session_expired_or_missing');
   });
 
 });
 
 test('it can mint spaces', async t => {
+  t.timeout(1000 * 60 * 5); // 5 minutes
+
   await asUserAccount(Accounts.CREATOR, async publicAddress => {
     const web3 = await AQVS.getWeb3();
     const initialBalance = AQVS.utils.ensureBigNumber(
@@ -155,7 +157,7 @@ test('it can mint spaces', async t => {
     const makeSessionResponse = await AQVS.sessions.makeSession(publicAddress);
     const currentSession = await makeSessionResponse.json();
     let cookie = makeSessionResponse.headers.get('set-cookie');
-	  t.is(!!currentSession.publicAddress, true);
+    t.is(!!currentSession.publicAddress, true);
 
     // The AQVS creator can setSpaceMetadata (which also serves as the ERC1155 token metadata)
     const response = await AQVS.creators.setSpaceMetadata(SPACE_ADDRESS, {
@@ -163,39 +165,80 @@ test('it can mint spaces', async t => {
       description: 'Spacings',
       image: 'https://f4.bcbits.com/img/a0195171096_16.jpg'
     }, cookie);
-	  t.is((await response.json()).status, 'ok');
+    t.is((await response.json()).status, 'ok');
 
     // The anyone can getSpaceMetadata (which also serves as the ERC1155 token metadata)
     const getSpaceMetadataResponse = await AQVS.spaces.getSpaceMetadata(SPACE_ADDRESS);
     const metadata = await getSpaceMetadataResponse.json();
-	  t.is(metadata.name, 'Rainbow Chan');
-	  t.is(metadata.description, 'Spacings');
-	  t.is(metadata.image, 'https://f4.bcbits.com/img/a0195171096_16.jpg');
+    t.is(metadata.name, 'Rainbow Chan');
+    t.is(metadata.description, 'Spacings');
+    t.is(metadata.image, 'https://f4.bcbits.com/img/a0195171096_16.jpg');
+
+    // The creator can manage cors for their space
+    const addCorsOriginResponse = await AQVS.creators.addCorsOrigin(
+      SPACE_ADDRESS,
+      "example.com",
+      cookie
+    );
+    t.is(addCorsOriginResponse.status, 200);
+
+    const addCorsOriginResponse2 = await AQVS.creators.addCorsOrigin(
+      SPACE_ADDRESS,
+      "example2.com",
+      cookie
+    );
+    t.is(addCorsOriginResponse2.status, 200);
+
+    const getCorsOriginsResponse = await AQVS.creators.getCorsOrigins(
+      SPACE_ADDRESS,
+      cookie
+    );
+    t.is(getCorsOriginsResponse.status, 200);
+
+    const corsOrigins = (await getCorsOriginsResponse.json()).origins;
+    t.is(corsOrigins.includes("example.com"), true);
+    t.is(corsOrigins.includes("example2.com"), true);
+    t.is(corsOrigins.length, 2);
+
+    const removeCorsOriginResponse = await AQVS.creators.removeCorsOrigin(
+      SPACE_ADDRESS,
+      "example.com",
+      cookie
+    );
+    t.is(removeCorsOriginResponse.status, 200);
+
+    const getCorsOriginsResponse2 = await AQVS.creators.getCorsOrigins(
+      SPACE_ADDRESS,
+      cookie
+    );
+    t.is(getCorsOriginsResponse2.status, 200);
+    const corsOrigins2 = (await getCorsOriginsResponse2.json()).origins;
+    t.is(corsOrigins2.includes("example.com"), false);
+    t.is(corsOrigins2.includes("example2.com"), true);
+    t.is(corsOrigins2.length, 1);
 
     // The AQVS Creator can deleta all files in the Space
     const deleteAllFilesInSpaceResponse =
       await AQVS.creators.deleteAllFilesInSpace(SPACE_ADDRESS, cookie);
-	  t.is((await deleteAllFilesInSpaceResponse.json()).status, 'ok');
+    t.is((await deleteAllFilesInSpaceResponse.json()).status, 'ok');
 
     const getSpaceContentsResponse = await AQVS.spaces.getSpaceContents(SPACE_ADDRESS, cookie);
     const contents = await getSpaceContentsResponse.json();
-	  t.is(contents.length, 0);
+    t.is(contents.length, 0);
 
     // Test an Upload
     const formData = new FormData();
     formData.append('/pixel.png', fs.createReadStream('./test/pixel.png'));
     const uploadFileResponse = await AQVS.creators.uploadFilesToSpace(SPACE_ADDRESS, formData, cookie);
-	  t.is(
+    t.is(
       (await uploadFileResponse.json()).success[0],
       '/pixel.png'
     );
 
   });
-
 });
 
 test('it can access spaces', async t => {
-
   await asUserAccount(Accounts.BUYER, async (publicAddress) => {
     const web3 = await AQVS.getWeb3();
     const spaceContract = await AQVS.spaces.getSpaceByAddress(SPACE_ADDRESS);
@@ -212,10 +255,10 @@ test('it can access spaces', async t => {
     const makeSessionResponse = await AQVS.sessions.makeSession(publicAddress);
     const currentSession = await makeSessionResponse.json();
     let cookie = makeSessionResponse.headers.get('set-cookie');
-	  t.is(!!currentSession.publicAddress, true);
+    t.is(!!currentSession.publicAddress, true);
 
     const getSpaceContentsResponse = await AQVS.spaces.getSpaceContents(SPACE_ADDRESS, cookie);
-	  t.is((await getSpaceContentsResponse.json()).error.message, 'unauthorized');
+    t.is((await getSpaceContentsResponse.json()).error.message, 'unauthorized');
 
     // Downloads don't work
     const gateway = AQVS.ENVIRONMENTS[AQVS.env].gateway;
@@ -225,6 +268,13 @@ test('it can access spaces', async t => {
       headers: { cookie }
     });
     t.is(fetchFileResponse.status, 500);
+
+    // non-creator Can not load cors list
+    const getCorsOriginsResponse = await AQVS.creators.getCorsOrigins(
+      SPACE_ADDRESS,
+      cookie
+    );
+    t.is(getCorsOriginsResponse.status, 500);
   });
 
   await asUserAccount(Accounts.CREATOR, async () => {
@@ -310,7 +360,7 @@ test('it can access spaces', async t => {
     let cookie = makeSessionResponse.headers.get('set-cookie');
     const deleteFileInSpaceResponse =
       await AQVS.creators.deleteFileInSpace(SPACE_ADDRESS, '/pixel.png', cookie);
-	  t.is((await deleteFileInSpaceResponse.json()).status, 'ok');
+    t.is((await deleteFileInSpaceResponse.json()).status, 'ok');
 
     // It can add space capacity
     const addSpaceCapacityTx
