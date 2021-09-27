@@ -41,6 +41,8 @@ jobs:
       - name: Run test env
         run: |
           cd gateway
+          yarn
+          TEST_STORAGEZONE_ACCESS_KEY=$TEST_STORAGEZONE_ACCESS_KEY TEST_STORAGEZONE=$TEST_STORAGEZONE yarn flush-storagezone
           rm -rf ganache_db && unzip ./test/fixtures/ganache_db.zip -d ./
           sudo chmod 755 -R ganache_db
           docker-compose -f docker-compose.yml -f docker-compose.test-env.yml up --build --force-recreate --detach
