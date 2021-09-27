@@ -1,6 +1,6 @@
 {
   "name": "@aqueous-varnish/client",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "main": "dist/aqvs.js",
   "license": "MIT",
   "dependencies": {
