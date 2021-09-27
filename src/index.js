@@ -124,9 +124,9 @@ const AQVS = {
       );
     },
 
-    // TODO: Remove the publicAddress argument here
     signNonce: async (publicAddress, nonce) => {
       const web3 = await AQVS.getWeb3();
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
       publicAddress = publicAddress.toLowerCase();
       return (await web3.eth.personal.sign(
         nonce,
@@ -135,8 +135,8 @@ const AQVS = {
       ));
     },
 
-    // TODO: Remove the publicAddress argument here
     makeSession: async (publicAddress) => {
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
       publicAddress = publicAddress.toLowerCase();
       const env = ENVIRONMENTS[AQVS.env];
       const { requestId, nonce } = await (await AQVS.sessions.requestNonce()).json();
@@ -415,7 +415,6 @@ const AQVS = {
       formData,
       cookie
     ) => {
-      // TODO: Test this works in Node (without setting boundary)?
       const env = ENVIRONMENTS[AQVS.env];
       let options = { method: 'put', body: formData, credentials: 'include' };
       if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
