@@ -50,7 +50,10 @@ test('it can manage sessions', async t => {
     const web3 = await AQVS.getWeb3();
 
     // Make a session
-    const makeSessionResponse = await AQVS.sessions.makeSession(publicAddress);
+    const makeSessionResponse = await AQVS.sessions.makeSession(
+      publicAddress,
+      "Please sign below to prove your identity (${nonce})"
+    );
     const currentSession = await makeSessionResponse.json();
     let cookie = makeSessionResponse.headers.get('set-cookie');
     t.is(!!currentSession.publicAddress, true);
@@ -316,8 +319,6 @@ test('it can access spaces', async t => {
         spaceContract
       )).toString(),
       (await AQVS.creators.estimateSpaceAccessFeesInWei(
-        3,
-        AQVS.units.mb * 5,
         web3.utils.toWei('1', 'ether'),
       )).toString()
     );
@@ -326,8 +327,6 @@ test('it can access spaces', async t => {
       aqvsPostBalance.toString(),
       aqvsInitialBalance.add(
         await AQVS.creators.estimateSpaceAccessFeesInWei(
-          3,
-          AQVS.units.mb * 5,
           web3.utils.toWei('1', 'ether'),
         )
       ).toString()
