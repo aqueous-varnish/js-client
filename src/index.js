@@ -7,7 +7,8 @@ const ERRORS = {
   delete_filepath_empty: 'delete_filepath_empty',
   space_does_not_exist: 'space_does_not_exist',
   invalid_environment: 'invalid_environment',
-  no_truffle_contract_set: 'no_truffle_contract_set'
+  no_truffle_contract_set: 'no_truffle_contract_set',
+  template_string_invalid: 'template_string_does_not_contain_nonce'
 };
 
 const ENVIRONMENTS = {
@@ -109,6 +110,9 @@ const AQVS = {
   },
 
   utils: {
+    interpolate: (str, vars) => {
+      return str.replace(/\${([^}]+)}/g,(m,p)=>p.split('.').reduce((a,f)=>a?a[f]:undefined,vars)??'');
+    },
     ensureBigNumber: (number) => {
       if (AQVS._web3.utils.isBN(number)) return number;
       return AQVS._web3.utils.toBN(number);
@@ -116,15 +120,24 @@ const AQVS = {
   },
 
   sessions: {
-    requestNonce: async () => {
+    requestNonce: async (publicAddress) => {
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
+      publicAddress = publicAddress.toLowerCase();
       const env = ENVIRONMENTS[AQVS.env];
       return AQVS.fetch(
         `${env.gateway}/nonce`,
-        { method: 'post' }
+        {
+          method: 'post',
+          body: JSON.stringify({ public_address: publicAddress }),
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+        }
       );
     },
 
-    signNonce: async (publicAddress, nonce) => {
+    signMessage: async (publicAddress, nonce) => {
       const web3 = await AQVS.getWeb3();
       publicAddress = publicAddress || (await web3.eth.getCoinbase());
       publicAddress = publicAddress.toLowerCase();
@@ -135,15 +148,38 @@ const AQVS = {
       ));
     },
 
-    makeSession: async (publicAddress) => {
+    makeSession: async (publicAddress, templateString) => {
       publicAddress = publicAddress || (await web3.eth.getCoinbase());
       publicAddress = publicAddress.toLowerCase();
       const env = ENVIRONMENTS[AQVS.env];
-      const { requestId, nonce } = await (await AQVS.sessions.requestNonce()).json();
-      const signature = await AQVS.sessions.signNonce(publicAddress, nonce);
+      const { nonce } = await (await AQVS.sessions.requestNonce(publicAddress)).json();
+
+      let message;
+      if (!!templateString) {
+        if (!templateString.includes("${nonce}")) {
+          throw new Error(ERRORS.template_string_invalid);
+        }
+        message = AQVS.utils.interpolate(templateString, { nonce });
+      } else {
+        message = nonce;
+      }
+
+      const signature = await AQVS.sessions.signMessage(publicAddress, message);
       return AQVS.fetch(
-        `${env.gateway}/session?requestId=${requestId}&publicAddress=${publicAddress}&signature=${signature}`,
-        { credentials: 'include' }
+        `${env.gateway}/session`,
+        {
+          credentials: 'include',
+          method: 'post',
+          body: JSON.stringify({
+            public_address: publicAddress,
+            message,
+            signature
+          }),
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+        }
       );
     },
 
@@ -279,19 +315,12 @@ const AQVS = {
       return (await AQVS.controllerContract.weiCostToMintSpace(spaceCapacityInBytes));
     },
 
-    // TODO: Why does this need initialSupply
     estimateSpaceAccessFeesInWei: async (
-      initialSupply,
-      spaceCapacityInBytes,
       accessPriceInWei
     ) => {
       if (!AQVS.controllerContract) await AQVS.init();
-      initialSupply = AQVS.utils.ensureBigNumber(initialSupply);
-      spaceCapacityInBytes = AQVS.utils.ensureBigNumber(spaceCapacityInBytes);
       accessPriceInWei = AQVS.utils.ensureBigNumber(accessPriceInWei);
       return (await AQVS.controllerContract.estimateSpaceFees(
-        initialSupply,
-        spaceCapacityInBytes,
         accessPriceInWei
       ));
     },
