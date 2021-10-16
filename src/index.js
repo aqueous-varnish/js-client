@@ -30,6 +30,14 @@ const ENVIRONMENTS = {
   }
 };
 
+const makeAdHocSpaceToken = async (spaceAddress, permissions) => {
+  const spaceTokenResponse =
+    await AQVS.creators.makeSpaceToken(spaceAddress, permissions);
+  if (spaceTokenResponse > 299) return spaceTokenResponse;
+  const spaceTokenData = await spaceTokenResponse.json();
+  return spaceTokenData.token;
+};
+
 const AQVS = {
   ENVIRONMENTS,
   ERRORS,
@@ -39,6 +47,11 @@ const AQVS = {
     if (!Object.keys(ENVIRONMENTS).includes(env)) throw new Error(ERRORS.invalid_environment);
     AQVS.env = env;
     if (!!AQVS.controllerContract) await AQVS.init();
+  },
+
+  clientName: 'system',
+  setClientName: (clientName) => {
+    AQVS.clientName = clientName;
   },
 
   _web3: null,
@@ -110,6 +123,17 @@ const AQVS = {
   },
 
   utils: {
+    signMessage: async (publicAddress, nonce) => {
+      const web3 = await AQVS.getWeb3();
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
+      publicAddress = publicAddress.toLowerCase();
+      return (await web3.eth.personal.sign(
+        nonce,
+        publicAddress,
+        '' // MetaMask will ignore the password argument here
+      ));
+    },
+
     interpolate: (str, vars) => {
       return str.replace(/\${([^}]+)}/g,(m,p)=>p.split('.').reduce((a,f)=>a?a[f]:undefined,vars)??'');
     },
@@ -128,24 +152,13 @@ const AQVS = {
         `${env.gateway}/nonce`,
         {
           method: 'post',
-          body: JSON.stringify({ public_address: publicAddress }),
+          body: JSON.stringify({ publicAddress }),
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json'
           },
         }
       );
-    },
-
-    signMessage: async (publicAddress, nonce) => {
-      const web3 = await AQVS.getWeb3();
-      publicAddress = publicAddress || (await web3.eth.getCoinbase());
-      publicAddress = publicAddress.toLowerCase();
-      return (await web3.eth.personal.sign(
-        nonce,
-        publicAddress,
-        '' // MetaMask will ignore the password argument here
-      ));
     },
 
     makeSession: async (publicAddress, templateString) => {
@@ -164,14 +177,15 @@ const AQVS = {
         message = nonce;
       }
 
-      const signature = await AQVS.sessions.signMessage(publicAddress, message);
+      const signature =
+        await AQVS.utils.signMessage(publicAddress, message);
       return AQVS.fetch(
         `${env.gateway}/session`,
         {
           credentials: 'include',
           method: 'post',
           body: JSON.stringify({
-            public_address: publicAddress,
+            publicAddress,
             message,
             signature
           }),
@@ -286,29 +300,117 @@ const AQVS = {
       );
     },
 
-    getSpaceContents: async (spaceAddress, cookie) => {
+    getSpaceContents: async (spaceAddress, cookieOrToken) => {
       const env = ENVIRONMENTS[AQVS.env];
-      let options = { credentials: 'include' };
-      if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
+      const options = { credentials: 'include', headers: {} };
+      if (cookieOrToken) {
+        if (cookieOrToken.startsWith("aqvs.session")) {
+          options.headers[`cookie`] = cookieOrToken;
+        } else {
+          options.headers[`Authorization`] = `Token ${cookieOrToken}`;
+        }
+      } else {
+        const token = await makeAdHocSpaceToken(spaceAddress, {
+          files: ['read']
+        });
+        options.headers[`Authorization`] = `Token ${token}`;
+      }
       return AQVS.fetch(
         `${env.gateway}/spaces/${spaceAddress.toLowerCase()}`,
         options
       );
     },
 
-    getSpaceMetadata: async (spaceAddress, cookie) => {
+    getSpaceMetadata: async (spaceAddress) => {
       const env = ENVIRONMENTS[AQVS.env];
-      let options = { credentials: 'include' };
-      if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
       return AQVS.fetch(
         `${env.gateway}/space-metadata/${spaceAddress.toLowerCase()}`,
-        options
       );
     },
-
   },
 
   creators: {
+    makeSpaceToken: async (
+      spaceAddress,
+      permissions,
+      client,
+      publicAddress
+    ) => {
+      const web3 = await AQVS.getWeb3();
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
+      publicAddress = publicAddress.toLowerCase();
+      const challengeResponse =
+        await AQVS.creators.makeSpaceTokenChallenge(
+          spaceAddress,
+          permissions,
+          (client || AQVS.clientName),
+          publicAddress
+        );
+      if (challengeResponse.status > 299) return challengeResponse;
+      const { challenge } = await challengeResponse.json();
+      const signature =
+        await AQVS.utils.signMessage(publicAddress, challenge);
+      return AQVS.creators.completeSpaceTokenChallenge(
+        spaceAddress,
+        signature,
+        publicAddress
+      );
+    },
+
+    makeSpaceTokenChallenge: async (
+      spaceAddress,
+      permissions,
+      client,
+      publicAddress
+    ) => {
+      const web3 = await AQVS.getWeb3();
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
+      publicAddress = publicAddress.toLowerCase();
+
+      const env = ENVIRONMENTS[AQVS.env];
+      return AQVS.fetch(
+        `${env.gateway}/space-tokens/${spaceAddress.toLowerCase()}/nonce`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            publicAddress,
+            permissions,
+            client: (client || AQVS.clientName)
+          }),
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+        }
+      );
+    },
+
+    completeSpaceTokenChallenge: async (
+      spaceAddress,
+      signature,
+      publicAddress
+    ) => {
+      const web3 = await AQVS.getWeb3();
+      publicAddress = publicAddress || (await web3.eth.getCoinbase());
+      publicAddress = publicAddress.toLowerCase();
+
+      const env = ENVIRONMENTS[AQVS.env];
+      return AQVS.fetch(
+        `${env.gateway}/space-tokens/${spaceAddress.toLowerCase()}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            publicAddress,
+            signature
+          }),
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+        }
+      );
+    },
+
     estimateCostToMintSpaceInWei: async (spaceCapacityInBytes) => {
       if (!AQVS.controllerContract) await AQVS.init();
       spaceCapacityInBytes = AQVS.utils.ensureBigNumber(spaceCapacityInBytes);
@@ -337,17 +439,22 @@ const AQVS = {
       );
     },
 
-    getCorsOrigins: async (spaceAddress, cookie) => {
+    getCorsOrigins: async (spaceAddress, token) => {
       const env = ENVIRONMENTS[AQVS.env];
-      let options = { credentials: 'include' };
-      if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
+      let options = { credentials: 'include', headers: {} };
+      if (!token) {
+        token = await makeAdHocSpaceToken(spaceAddress, {
+          cors: ['read']
+        });
+      }
+      options.headers[`Authorization`] = `Token ${token}`;
       return AQVS.fetch(
         `${env.gateway}/space-cors/${spaceAddress.toLowerCase()}`,
         options
       );
     },
 
-    addCorsOrigin: async (spaceAddress, origin, cookie) => {
+    addCorsOrigin: async (spaceAddress, origin, token) => {
       const env = ENVIRONMENTS[AQVS.env];
       const options = {
         credentials: 'include',
@@ -358,14 +465,19 @@ const AQVS = {
           'Content-Type': 'application/json'
         },
       };
-      if (cookie) { options.headers.cookie = cookie }
+      if (!token) {
+        token = await makeAdHocSpaceToken(spaceAddress, {
+          cors: ['write']
+        });
+      }
+      options.headers[`Authorization`] = `Token ${token}`;
       return AQVS.fetch(
         `${env.gateway}/space-cors/${spaceAddress.toLowerCase()}`,
         options
       );
     },
 
-    removeCorsOrigin: async (spaceAddress, origin, cookie) => {
+    removeCorsOrigin: async (spaceAddress, origin, token) => {
       const env = ENVIRONMENTS[AQVS.env];
       const options = {
         credentials: 'include',
@@ -376,7 +488,12 @@ const AQVS = {
           'Content-Type': 'application/json'
         },
       };
-      if (cookie) { options.headers.cookie = cookie }
+      if (!token) {
+        token = await makeAdHocSpaceToken(spaceAddress, {
+          cors: ['write']
+        });
+      }
+      options.headers[`Authorization`] = `Token ${token}`;
       return AQVS.fetch(
         `${env.gateway}/space-cors/${spaceAddress.toLowerCase()}`,
         options
@@ -421,7 +538,7 @@ const AQVS = {
       );
     },
 
-    setSpaceMetadata: async (spaceAddress, data, cookie) => {
+    setSpaceMetadata: async (spaceAddress, data, token) => {
       const env = ENVIRONMENTS[AQVS.env];
       const options = {
         credentials: 'include',
@@ -432,7 +549,12 @@ const AQVS = {
           'Content-Type': 'application/json'
         },
       };
-      if (cookie) { options.headers.cookie = cookie }
+      if (!token) {
+        token = await makeAdHocSpaceToken(spaceAddress, {
+          metadata: ['write']
+        });
+      }
+      options.headers[`Authorization`] = `Token ${token}`;
       return AQVS.fetch(
         `${env.gateway}/space-metadata/${spaceAddress.toLowerCase()}`,
         options
@@ -442,11 +564,21 @@ const AQVS = {
     uploadFilesToSpace: async (
       spaceAddress,
       formData,
-      cookie
+      token
     ) => {
       const env = ENVIRONMENTS[AQVS.env];
-      let options = { method: 'put', body: formData, credentials: 'include' };
-      if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
+      let options = {
+        method: 'put',
+        body: formData,
+        credentials: 'include',
+        headers: {}
+      };
+      if (!token) {
+        token = await makeAdHocSpaceToken(spaceAddress, {
+          files: ['write']
+        });
+      }
+      options.headers[`Authorization`] = `Token ${token}`;
       return AQVS.fetch(
         `${env.gateway}/spaces/${spaceAddress.toLowerCase()}`,
         options
@@ -456,13 +588,22 @@ const AQVS = {
     deleteFileInSpace: async (
       spaceAddress,
       filePath,
-      cookie
+      token
     ) => {
       filePath = filePath.startsWith("/") ? filePath : `/${filePath}`;
       if (filePath.length === 1) throw new Error(ERRORS.delete_filepath_empty);
       const env = ENVIRONMENTS[AQVS.env];
-      let options = { method: 'delete', credentials: 'include' };
-      if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
+      let options = {
+        method: 'delete',
+        credentials: 'include',
+        headers: {}
+      };
+      if (!token) {
+        token = await makeAdHocSpaceToken(spaceAddress, {
+          files: ['write']
+        });
+      }
+      options.headers[`Authorization`] = `Token ${token}`;
       return AQVS.fetch(
         `${env.gateway}/spaces/${spaceAddress.toLowerCase()}${filePath}`,
         options
@@ -471,11 +612,20 @@ const AQVS = {
 
     deleteAllFilesInSpace: async (
       spaceAddress,
-      cookie
+      token
     ) => {
       const env = ENVIRONMENTS[AQVS.env];
-      let options = { method: 'delete', credentials: 'include' };
-      if (cookie) { options = Object.assign(options, { headers: { cookie }}); }
+      let options = {
+        method: 'delete',
+        credentials: 'include',
+        headers: {}
+      };
+      if (!token) {
+        token = await makeAdHocSpaceToken(spaceAddress, {
+          files: ['write']
+        });
+      }
+      options.headers[`Authorization`] = `Token ${token}`;
       return AQVS.fetch(
         `${env.gateway}/spaces/${spaceAddress.toLowerCase()}`,
         options
