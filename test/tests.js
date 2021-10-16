@@ -45,7 +45,7 @@ const asUserAccount = async (index, callback) => {
 };
 
 
-test('it can manage sessions', async t => {
+test('it can manage viewer sessions', async t => {
   await asUserAccount(Accounts.CREATOR , async publicAddress => {
     const web3 = await AQVS.getWeb3();
 
@@ -162,12 +162,19 @@ test('it can mint spaces', async t => {
     let cookie = makeSessionResponse.headers.get('set-cookie');
     t.is(!!currentSession.publicAddress, true);
 
-    // The AQVS creator can setSpaceMetadata (which also serves as the ERC1155 token metadata)
+    // TODO: Test me
+    //const spaceTokenResponse =
+    //  await AQVS.creators.makeSpaceToken(SPACE_ADDRESS, {
+    //    metadata: ['write']
+    //  });
+    //const { token } = await spaceTokenResponse.json();
+
+    // The AQVS creator can setSpaceMetadata (which also serves as the ERC721 token metadata)
     const response = await AQVS.creators.setSpaceMetadata(SPACE_ADDRESS, {
       name: 'Rainbow Chan',
       description: 'Spacings',
       image: 'https://f4.bcbits.com/img/a0195171096_16.jpg'
-    }, cookie);
+    });
     t.is((await response.json()).status, 'ok');
 
     // The anyone can getSpaceMetadata (which also serves as the ERC1155 token metadata)
@@ -181,20 +188,17 @@ test('it can mint spaces', async t => {
     const addCorsOriginResponse = await AQVS.creators.addCorsOrigin(
       SPACE_ADDRESS,
       "example.com",
-      cookie
     );
     t.is(addCorsOriginResponse.status, 200);
 
     const addCorsOriginResponse2 = await AQVS.creators.addCorsOrigin(
       SPACE_ADDRESS,
       "example2.com",
-      cookie
     );
     t.is(addCorsOriginResponse2.status, 200);
 
     const getCorsOriginsResponse = await AQVS.creators.getCorsOrigins(
       SPACE_ADDRESS,
-      cookie
     );
     t.is(getCorsOriginsResponse.status, 200);
 
@@ -206,13 +210,11 @@ test('it can mint spaces', async t => {
     const removeCorsOriginResponse = await AQVS.creators.removeCorsOrigin(
       SPACE_ADDRESS,
       "example.com",
-      cookie
     );
     t.is(removeCorsOriginResponse.status, 200);
 
     const getCorsOriginsResponse2 = await AQVS.creators.getCorsOrigins(
       SPACE_ADDRESS,
-      cookie
     );
     t.is(getCorsOriginsResponse2.status, 200);
     const corsOrigins2 = (await getCorsOriginsResponse2.json()).origins;
@@ -222,17 +224,21 @@ test('it can mint spaces', async t => {
 
     // The AQVS Creator can deleta all files in the Space
     const deleteAllFilesInSpaceResponse =
-      await AQVS.creators.deleteAllFilesInSpace(SPACE_ADDRESS, cookie);
+      await AQVS.creators.deleteAllFilesInSpace(SPACE_ADDRESS);
     t.is((await deleteAllFilesInSpaceResponse.json()).status, 'ok');
 
-    const getSpaceContentsResponse = await AQVS.spaces.getSpaceContents(SPACE_ADDRESS, cookie);
-    const contents = await getSpaceContentsResponse.json();
-    t.is(contents.length, 0);
+    const getSpaceContentsResponseWithCookie = await AQVS.spaces.getSpaceContents(SPACE_ADDRESS, cookie);
+    const contentsWithCookie = await getSpaceContentsResponseWithCookie.json();
+    t.is(contentsWithCookie.length, 0);
+
+    const getSpaceContentsResponseWithToken = await AQVS.spaces.getSpaceContents(SPACE_ADDRESS);
+    const contentsWithToken = await getSpaceContentsResponseWithToken.json();
+    t.is(contentsWithToken.length, 0);
 
     // Test an Upload
     const formData = new FormData();
     formData.append('/pixel.png', fs.createReadStream('./test/pixel.png'));
-    const uploadFileResponse = await AQVS.creators.uploadFilesToSpace(SPACE_ADDRESS, formData, cookie);
+    const uploadFileResponse = await AQVS.creators.uploadFilesToSpace(SPACE_ADDRESS, formData);
     t.is(
       (await uploadFileResponse.json()).success[0],
       '/pixel.png'
@@ -355,10 +361,8 @@ test('it can access spaces', async t => {
     const spaceContract = await AQVS.spaces.getSpaceByAddress(SPACE_ADDRESS);
 
     // It can add delete an individual file
-    const makeSessionResponse = await AQVS.sessions.makeSession(publicAddress);
-    let cookie = makeSessionResponse.headers.get('set-cookie');
     const deleteFileInSpaceResponse =
-      await AQVS.creators.deleteFileInSpace(SPACE_ADDRESS, '/pixel.png', cookie);
+      await AQVS.creators.deleteFileInSpace(SPACE_ADDRESS, '/pixel.png');
     t.is((await deleteFileInSpaceResponse.json()).status, 'ok');
 
     // It can add space capacity
